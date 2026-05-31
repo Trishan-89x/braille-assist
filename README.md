@@ -1,69 +1,121 @@
-# Smart Braille Communication System
+# Braille-to-Text and Speech Conversion System
 
 ## Overview
-This project is a low-cost assistive communication system designed to help visually impaired users interact with digital text through Braille. The system converts text input into Braille output using an electromechanical interface and also provides audio feedback for confirmation.
 
-The goal of the project is to create an accessible and affordable interface that enables visually impaired users to read or receive information from digital systems.
+This project is a real-time assistive system that reads physical Braille text and converts it into audible speech. An ESP32-CAM captures images of Braille characters, which are sent over WiFi to a Flask-based server for image processing. The server uses computer vision techniques to detect Braille dots, interpret the characters, and output the recognized text as speech using a text-to-speech engine.
+
+The system is designed to be low-cost, modular, and accessible — providing an affordable assistive solution for visually impaired individuals.
 
 ## Features
-- Converts text input into Braille representation
-- Electromechanical actuation of Braille dots
-- Audio feedback using text-to-speech
-- Real-time processing of input commands
-- Designed for low-cost and portability
+
+- Real-time Braille image capture using ESP32-CAM
+- CNC plotter-based mechanical scanning for precise, systematic camera positioning
+- OpenCV-based image processing pipeline (grayscale, Gaussian blur, adaptive thresholding, morphological operations)
+- Contour detection and filtering for accurate Braille dot identification
+- 6-dot grid mapping for Braille character recognition (A–Z)
+- Temporal filtering (multi-frame validation + debouncing) for stable detection
+- Word-level buffering with timeout-based word boundary detection
+- Text-to-speech output using pyttsx3 (supports English and Spanish)
+- Multithreaded speech queue for non-blocking audio output
 
 ## System Architecture
-The system consists of three main components:
 
-1. **Input Module**
-   - Receives text input from a connected interface.
+The system is divided into 11 independent modules:
 
-2. **Processing Unit**
-   - Converts characters into their corresponding Braille patterns.
-   - Controls the actuation mechanism.
+1. **Mechanical Scanning Module** — ESP32-S3 + stepper motors control X/Y axis movement using the AccelStepper library. Push buttons allow manual positioning of the camera over each Braille cell.
 
-3. **Braille Output Module**
-   - Mechanical pins represent Braille characters.
-   - Actuated according to the processed Braille pattern.
+2. **Image Acquisition Module** — ESP32-CAM captures images at VGA resolution in JPEG format with sensor-level corrections (vertical flip, horizontal mirror).
 
-4. **Audio Feedback Module**
-   - Provides speech output for confirmation.
+3. **Communication Module** — ESP32-CAM connects to WiFi and sends captured images to the Flask server via HTTP POST requests (Content-Type: image/jpeg).
+
+4. **Server Interface Module** — Flask API endpoint (`/upload`) receives the image byte stream, converts it to a NumPy array, and decodes it into an OpenCV-compatible image.
+
+5. **Image Processing Pipeline** — Extracts a Region of Interest (ROI), applies grayscale conversion, Gaussian blur, adaptive thresholding, and morphological opening to isolate Braille dots.
+
+6. **Feature Extraction Module** — Detects contours in the binary image, filters them by area and radius, and computes centroids of valid Braille dots.
+
+7. **Braille Interpretation Module** — Maps detected dot positions onto a 2-column × 3-row grid to form a 6-bit binary vector, which is matched against a lookup table to identify the corresponding character.
+
+8. **Temporal Filtering Module** — Accepts a character only after it is detected consistently for a minimum number of frames (default: 5), with debouncing to prevent duplicate entries.
+
+9. **Word Formation Module** — Buffers recognized characters sequentially; uses a timeout mechanism to detect word boundaries and finalize complete words.
+
+10. **Speech Synthesis Module** — Uses pyttsx3 for offline TTS with selectable voice (English or Spanish). A speech queue with a dedicated worker thread ensures non-blocking speech generation.
+
+11. **Output Module** — Plays synthesized speech through a speaker, providing real-time audio feedback of the interpreted Braille text.
 
 ## Hardware Components
-- Microcontroller (ESP32 / Raspberry Pi depending on configuration)
-- Braille actuator mechanism (solenoids / servos / pins)
-- Driver circuitry
+
+- ESP32-CAM (AI Thinker module)
+- ESP32-S3 microcontroller
+- Stepper motors (X and Y axes)
+- Stepper motor driver circuitry
+- CNC plotter frame / mechanical scanning structure
+- Push buttons (X forward, X backward, Y forward, Y backward)
+- Speaker / audio output device
 - Power supply
-- Audio output module
+- Laptop/PC running the Flask server
 
 ## Software Components
-- Character to Braille conversion algorithm
-- Control logic for actuator drivers
-- Serial / network communication interface
-- Text-to-speech integration
+
+- **Arduino / ESP-IDF:** ESP32-CAM firmware (camera init, WiFi, HTTP POST), ESP32-S3 firmware (AccelStepper motor control)
+- **Python / Flask:** Server-side API for receiving and processing images
+- **OpenCV:** Image preprocessing and contour detection
+- **NumPy:** Image array handling
+- **pyttsx3:** Offline text-to-speech engine
+- **Python threading / queue:** Multithreaded speech worker
 
 ## Working Principle
-1. Text input is received by the processing unit.
-2. The system maps each character to its Braille equivalent.
-3. The microcontroller activates the corresponding actuator pins.
-4. Braille dots are formed physically.
-5. Audio feedback confirms the output.
 
-## Applications
-- Assistive technology for visually impaired individuals
-- Educational tools for learning Braille
-- Low-cost accessibility devices
-- Human-computer interaction for accessibility
+1. The user positions the camera over a Braille cell using the CNC plotter (via push buttons).
+2. The ESP32-CAM captures an image and transmits it to the Flask server via HTTP POST over WiFi.
+3. The Flask server preprocesses the image (ROI extraction → grayscale → blur → thresholding → morphological ops).
+4. Contour detection identifies Braille dots; their centroids are mapped onto a 6-dot grid.
+5. The resulting binary pattern is matched against a Braille lookup table to identify the character.
+6. Temporal filtering validates the character across multiple frames to ensure stability.
+7. Validated characters are accumulated in a word buffer; a timeout finalizes each complete word.
+8. The finalized word is passed to pyttsx3, which speaks it aloud through the speaker.
+
+## Advantages
+
+- Low-cost implementation using open-source hardware and software
+- Robust detection under varying lighting using adaptive thresholding
+- Reduced false detections via temporal filtering and debouncing
+- Word-level speech output for better usability
+- Multilingual support (English and Spanish)
+- Modular design — easy to debug, extend, and maintain
+
+## Limitations
+
+- Dependent on WiFi availability for image transmission
+- Manual button-based scanning (no automatic line/paragraph traversal)
+- Supports only basic Braille alphabet (A–Z); no numbers, punctuation, or contractions
+- Processing pipeline introduces some latency (not fully instantaneous)
+- Camera alignment with Braille dots is sensitive; misalignment reduces accuracy
+- Not fully portable due to CNC mechanism and server dependency
 
 ## Future Improvements
-- Refreshable multi-cell Braille display
-- Wireless connectivity
-- Mobile application integration
-- Miniaturized actuator design
+
+- Automatic line and paragraph scanning
+- Support for Grade 2 Braille (contractions, numbers, punctuation)
+- Standalone offline mode (remove WiFi/server dependency)
+- Additional language support beyond English and Spanish
+- Miniaturized and portable form factor
 
 ## Contributors
-- Your Name
-- Team / Lab / Organization
+
+- Sayandeep Kundu (24BEC0205)
+- Trishan Talukdar (24BEC0450)
+- Aditya Chakrabarti (24BEC0454)
+
+School of Electronics Engineering, Vellore Institute of Technology
+Course: Microprocessors and Microcontrollers (BECE204L)
+Faculty: Dr. S. Sundar | Winter Semester 2025–2026
+
+## Demo
+
+[View Demo Video](https://drive.google.com/drive/folders/1y0GSsZr4Jz3g7TpYAep5FCvrYLmXPWHp)
 
 ## License
+
 This project is released for educational and research purposes.
